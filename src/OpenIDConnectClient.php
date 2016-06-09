@@ -1,11 +1,13 @@
 <?php
 
+namespace Trikoder\OpenIdConnectPhp;
+
 /**
  *
- * Copyright MITRE 2015
+ * Copyright Trikoder 2016
  *
- * OpenIDConnectClient for PHP5
- * Author: Michael Jett <mjett@mitre.org>
+ * OpenIDConnectClient for Symfony
+ * Author Alen Pokos <alen.pokos@trkoder.net>
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -19,75 +21,17 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  *
+ * 
  */
 
-/**
- * Use session to manage a nonce
- */
-if (!isset($_SESSION)) {
-    session_start();
-}
-
-/**
- *
- * JWT signature verification support by Jonathan Reed <jdreed@mit.edu>
- * Licensed under the same license as the rest of this file.
- *
- * phpseclib is required to validate the signatures of some tokens.
- * It can be downloaded from: http://phpseclib.sourceforge.net/
- */
-
-if (!class_exists('\phpseclib\Crypt\RSA')) {
-    user_error('Unable to find phpseclib Crypt/RSA.php.  Ensure phpseclib is installed and in include_path');
-}
-
-/**
- * A wrapper around base64_decode which decodes Base64URL-encoded data,
- * which is not the same alphabet as base64.
- */
-function base64url_decode($base64url) {
-    return base64_decode(b64url2b64($base64url));
-}
-
-/**
- * Per RFC4648, "base64 encoding with URL-safe and filename-safe
- * alphabet".  This just replaces characters 62 and 63.  None of the
- * reference implementations seem to restore the padding if necessary,
- * but we'll do it anyway.
- *
- */
-function b64url2b64($base64url) {
-    // "Shouldn't" be necessary, but why not
-    $padding = strlen($base64url) % 4;
-    if ($padding > 0) {
-	$base64url .= str_repeat("=", 4 - $padding);
-    }
-    return strtr($base64url, '-_', '+/');
-}
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Session\Session;
+use Symfony\Component\HttpFoundation\Session\Storage\SessionStorageInterface;
 
 
 /**
- * OpenIDConnect Exception Class
- */
-class OpenIDConnectClientException extends Exception
-{
-
-}
-
-/**
- * Require the CURL and JSON PHP extentions to be installed
- */
-if (!function_exists('curl_init')) {
-    throw new OpenIDConnectClientException('OpenIDConnect needs the CURL PHP extension.');
-}
-if (!function_exists('json_decode')) {
-    throw new OpenIDConnectClientException('OpenIDConnect needs the JSON PHP extension.');
-}
-
-/**
- *
- * Please note this class stores nonces in $_SESSION['openid_connect_nonce']
- *
+ * Class OpenIDConnectClient
+ * @package Trikoder\OpenIdConnectPhp
  */
 class OpenIDConnectClient
 {
@@ -148,22 +92,42 @@ class OpenIDConnectClient
     private $authParams = array();
 
     /**
+     * @var Request
+     */
+    private $request;
+
+    /**
+     * @var Session
+     */
+    private $session;
+
+    /**
      * @param $provider_url string optional
      *
      * @param $client_id string optional
      * @param $client_secret string optional
-     *
+     * @param Request $request
+     * @param SessionStorageInterface $sessionStorage
      */
-    public function __construct($provider_url = null, $client_id = null, $client_secret = null) {
+    public function __construct(
+        $provider_url = null,
+        $client_id = null,
+        $client_secret = null,
+        Request $request,
+        Session $session
+    ) {
         $this->setProviderURL($provider_url);
         $this->clientID = $client_id;
         $this->clientSecret = $client_secret;
+        $this->request = $request;
+        $this->session = $session;
     }
 
     /**
      * @param $provider_url
      */
-    public function setProviderURL($provider_url) {
+    public function setProviderURL($provider_url)
+    {
         $this->providerConfig['issuer'] = $provider_url;
     }
 
@@ -171,17 +135,18 @@ class OpenIDConnectClient
      * @return bool
      * @throws OpenIDConnectClientException
      */
-    public function authenticate() {
+    public function authenticate()
+    {
 
         // Do a preemptive check to see if the provider has thrown an error from a previous redirect
-        if (isset($_REQUEST['error'])) {
-            throw new OpenIDConnectClientException("Error: " . $_REQUEST['error'] . " Description: " . $_REQUEST['error_description']);
+        if ($this->request->query->has('error')) {
+            throw new OpenIDConnectClientException("Error: " . $this->request->query->get('error') . " Description: " . $this->request->query->get('error_description'));
         }
 
         // If we have an authorization code then proceed to request a token
-        if (isset($_REQUEST["code"])) {
+        if ($this->request->query->has('code')) {
 
-            $code = $_REQUEST["code"];
+            $code = $this->request->query->get('code');
             $token_json = $this->requestTokens($code);
 
             // Throw an error if the server returns one
@@ -190,7 +155,7 @@ class OpenIDConnectClient
             }
 
             // Do an OpenID Connect session check
-            if ($_REQUEST['state'] != $_SESSION['openid_connect_state']) {
+            if ($this->request->query->get('state') != $this->session->get('openid_connect_state')) {
                 throw new OpenIDConnectClientException("Unable to determine state");
             }
 
@@ -213,13 +178,15 @@ class OpenIDConnectClient
             if ($this->verifyJWTclaims($claims)) {
 
                 // Clean up the session a little
-                unset($_SESSION['openid_connect_nonce']);
+                $this->session->remove('openid_connect_nonce');
 
                 // Save the access token
                 $this->accessToken = $token_json->access_token;
 
                 // Save the refresh token, if we got one
-                if (isset($token_json->refresh_token)) $this->refreshToken = $token_json->refresh_token;
+                if (isset($token_json->refresh_token)) {
+                    $this->refreshToken = $token_json->refresh_token;
+                }
 
                 // Success!
                 return true;
@@ -239,14 +206,16 @@ class OpenIDConnectClient
     /**
      * @param $scope - example: openid, given_name, etc...
      */
-    public function addScope($scope) {
+    public function addScope($scope)
+    {
         $this->scopes = array_merge($this->scopes, (array)$scope);
     }
 
     /**
      * @param $param - example: prompt=login
      */
-    public function addAuthParam($param) {
+    public function addAuthParam($param)
+    {
         $this->authParams = array_merge($this->authParams, (array)$param);
     }
 
@@ -258,12 +227,13 @@ class OpenIDConnectClient
      * @return string
      *
      */
-    private function getProviderConfigValue($param) {
+    private function getProviderConfigValue($param)
+    {
 
         // If the configuration value is not available, attempt to fetch it from a well known config endpoint
         // This is also known as auto "discovery"
         if (!isset($this->providerConfig[$param])) {
-            $well_known_config_url = rtrim($this->getProviderURL(),"/") . "/.well-known/openid-configuration";
+            $well_known_config_url = rtrim($this->getProviderURL(), "/") . "/.well-known/openid-configuration";
             $value = json_decode($this->fetchURL($well_known_config_url))->{$param};
 
             if ($value) {
@@ -281,7 +251,8 @@ class OpenIDConnectClient
     /**
      * @param $url Sets redirect URL for auth flow
      */
-    public function setRedirectURL ($url) {
+    public function setRedirectURL($url)
+    {
         if (filter_var($url, FILTER_VALIDATE_URL) !== false) {
             $this->redirectURL = $url;
         }
@@ -292,7 +263,8 @@ class OpenIDConnectClient
      *
      * @return string
      */
-    public function getRedirectURL() {
+    public function getRedirectURL()
+    {
 
         // If the redirect URL has been set then return it.
         if (property_exists($this, 'redirectURL') && $this->redirectURL) {
@@ -323,15 +295,17 @@ class OpenIDConnectClient
      *
      * @return string
      */
-    protected function generateRandString() {
-        return md5(uniqid(rand(), TRUE));
+    protected function generateRandString()
+    {
+        return md5(uniqid(rand(), true));
     }
 
     /**
      * Start Here
      * @return void
      */
-    private function requestAuthorization() {
+    private function requestAuthorization()
+    {
 
         $auth_endpoint = $this->getProviderConfigValue("authorization_endpoint");
         $response_type = "code";
@@ -339,11 +313,11 @@ class OpenIDConnectClient
         // Generate and store a nonce in the session
         // The nonce is an arbitrary value
         $nonce = $this->generateRandString();
-        $_SESSION['openid_connect_nonce'] = $nonce;
+        $this->session->set('openid_connect_nonce', $nonce);
 
         // State essentially acts as a session key for OIDC
         $state = $this->generateRandString();
-        $_SESSION['openid_connect_state'] = $state;
+        $this->session->set('openid_connect_state', $state);
 
         $auth_params = array_merge($this->authParams, array(
             'response_type' => $response_type,
@@ -372,7 +346,8 @@ class OpenIDConnectClient
      * @param $code
      * @return mixed
      */
-    private function requestTokens($code) {
+    private function requestTokens($code)
+    {
 
 
         $token_endpoint = $this->getProviderConfigValue("token_endpoint");
@@ -400,7 +375,8 @@ class OpenIDConnectClient
      * @param $code
      * @return mixed
      */
-    public function refreshToken($refresh_token) {
+    public function refreshToken($refresh_token)
+    {
         $token_endpoint = $this->getProviderConfigValue("token_endpoint");
 
         $grant_type = "refresh_token";
@@ -422,24 +398,24 @@ class OpenIDConnectClient
     }
 
     /**
-      * @param array $keys
-      * @param array $header
-      * @throws OpenIDConnectClientException
-      * @return object
-      */
-     private function get_key_for_header($keys, $header) {
-         foreach ($keys as $key) {
-           if ((!(isset($key->alg) && isset($header->kid)) && $key->kty == 'RSA') || ($key->alg == $header->alg && $key->kid == $header->kid)) {
-                 return $key;
-             }
-         }
-         if (isset($header->kid)) {
-             throw new OpenIDConnectClientException('Unable to find a key for (algorithm, kid):' . $header->alg . ', ' . $header->kid . ')');
-         } else {
-             throw new OpenIDConnectClientException('Unable to find a key for RSA');
-         }
-     }
-
+     * @param array $keys
+     * @param array $header
+     * @throws OpenIDConnectClientException
+     * @return object
+     */
+    private function get_key_for_header($keys, $header)
+    {
+        foreach ($keys as $key) {
+            if ((!(isset($key->alg) && isset($header->kid)) && $key->kty == 'RSA') || ($key->alg == $header->alg && $key->kid == $header->kid)) {
+                return $key;
+            }
+        }
+        if (isset($header->kid)) {
+            throw new OpenIDConnectClientException('Unable to find a key for (algorithm, kid):' . $header->alg . ', ' . $header->kid . ')');
+        } else {
+            throw new OpenIDConnectClientException('Unable to find a key for RSA');
+        }
+    }
 
 
     /**
@@ -448,7 +424,8 @@ class OpenIDConnectClient
      * @throws OpenIDConnectClientException
      * @return bool
      */
-    private function verifyRSAJWTsignature($hashtype, $key, $payload, $signature) {
+    private function verifyRSAJWTsignature($hashtype, $key, $payload, $signature)
+    {
         if (!class_exists('\phpseclib\Crypt\RSA')) {
             throw new OpenIDConnectClientException('Crypt_RSA support unavailable.');
         }
@@ -459,9 +436,9 @@ class OpenIDConnectClient
         /* We already have base64url-encoded data, so re-encode it as
            regular base64 and use the XML key format for simplicity.
         */
-        $public_key_xml = "<RSAKeyValue>\r\n".
-            "  <Modulus>" . b64url2b64($key->n) . "</Modulus>\r\n" .
-            "  <Exponent>" . b64url2b64($key->e) . "</Exponent>\r\n" .
+        $public_key_xml = "<RSAKeyValue>\r\n" .
+            "  <Modulus>" . $this->b64url2b64($key->n) . "</Modulus>\r\n" .
+            "  <Exponent>" . $this->b64url2b64($key->e) . "</Exponent>\r\n" .
             "</RSAKeyValue>";
         $rsa = new \phpseclib\Crypt\RSA();
         $rsa->setHash($hashtype);
@@ -475,28 +452,29 @@ class OpenIDConnectClient
      * @throws OpenIDConnectClientException
      * @return bool
      */
-    private function verifyJWTsignature($jwt) {
+    private function verifyJWTsignature($jwt)
+    {
         $parts = explode(".", $jwt);
-        $signature = base64url_decode(array_pop($parts));
-        $header = json_decode(base64url_decode($parts[0]));
+        $signature = $this->base64url_decode(array_pop($parts));
+        $header = json_decode($this->base64url_decode($parts[0]));
         $payload = implode(".", $parts);
         $jwks = json_decode($this->fetchURL($this->getProviderConfigValue('jwks_uri')));
-        if ($jwks === NULL) {
+        if ($jwks === null) {
             throw new OpenIDConnectClientException('Error decoding JSON from jwks_uri');
         }
         $verified = false;
         switch ($header->alg) {
-        case 'RS256':
-        case 'RS384':
-        case 'RS512':
-            $hashtype = 'sha' . substr($header->alg, 2);
+            case 'RS256':
+            case 'RS384':
+            case 'RS512':
+                $hashtype = 'sha' . substr($header->alg, 2);
 
-            $verified = $this->verifyRSAJWTsignature($hashtype,
-                                                     $this->get_key_for_header($jwks->keys, $header),
-                                                     $payload, $signature);
-            break;
-        default:
-            throw new OpenIDConnectClientException('No support for signature type: ' . $header->alg);
+                $verified = $this->verifyRSAJWTsignature($hashtype,
+                    $this->get_key_for_header($jwks->keys, $header),
+                    $payload, $signature);
+                break;
+            default:
+                throw new OpenIDConnectClientException('No support for signature type: ' . $header->alg);
         }
         return $verified;
     }
@@ -505,10 +483,11 @@ class OpenIDConnectClient
      * @param object $claims
      * @return bool
      */
-    private function verifyJWTclaims($claims) {
+    private function verifyJWTclaims($claims)
+    {
         return (($claims->iss == $this->getProviderURL())
             && (($claims->aud == $this->clientID) || (in_array($this->clientID, $claims->aud)))
-            && ($claims->nonce == $_SESSION['openid_connect_nonce']));
+            && ($claims->nonce == $this->session->get('openid_connect_nonce')));
 
     }
 
@@ -517,10 +496,11 @@ class OpenIDConnectClient
      * @param int $section the section we would like to decode
      * @return object
      */
-    private function decodeJWT($jwt, $section = 0) {
+    private function decodeJWT($jwt, $section = 0)
+    {
 
         $parts = explode(".", $jwt);
-        return json_decode(base64url_decode($parts[$section]));
+        return json_decode($this->base64url_decode($parts[$section]));
     }
 
     /**
@@ -550,7 +530,8 @@ class OpenIDConnectClient
      * @return mixed
      *
      */
-    public function requestUserInfo($attribute) {
+    public function requestUserInfo($attribute)
+    {
 
         // Check to see if the attribute is already in memory
         if (array_key_exists($attribute, $this->userInfo)) {
@@ -565,7 +546,7 @@ class OpenIDConnectClient
         //The accessToken has to be send in the Authorization header, so we create a new array with only this header.
         $headers = array("Authorization: Bearer {$this->accessToken}");
 
-        $user_json = json_decode($this->fetchURL($user_info_endpoint,null,$headers));
+        $user_json = json_decode($this->fetchURL($user_info_endpoint, null, $headers));
 
         $this->userInfo = $user_json;
 
@@ -585,7 +566,8 @@ class OpenIDConnectClient
      * @throws OpenIDConnectClientException
      * @return mixed
      */
-    protected function fetchURL($url, $post_body = null,$headers = array()) {
+    protected function fetchURL($url, $post_body = null, $headers = array())
+    {
 
 
         // OK cool - then let's create a new cURL resource handle
@@ -611,8 +593,8 @@ class OpenIDConnectClient
         }
 
         // If we set some heaers include them
-        if(count($headers) > 0) {
-          curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        if (count($headers) > 0) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         }
 
         // Set URL to download
@@ -634,7 +616,7 @@ class OpenIDConnectClient
             curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
             curl_setopt($ch, CURLOPT_CAINFO, $this->certPath);
         } else {
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         }
 
         // Should cURL return or print out the data? (true = return, false = print)
@@ -660,7 +642,8 @@ class OpenIDConnectClient
      * @return string
      * @throws OpenIDConnectClientException
      */
-    public function getProviderURL() {
+    public function getProviderURL()
+    {
 
         if (!isset($this->providerConfig['issuer'])) {
             throw new OpenIDConnectClientException("The provider URL has not been set");
@@ -672,7 +655,8 @@ class OpenIDConnectClient
     /**
      * @param $url
      */
-    public function redirect($url) {
+    public function redirect($url)
+    {
         header('Location: ' . $url);
         exit;
     }
@@ -680,14 +664,16 @@ class OpenIDConnectClient
     /**
      * @param $httpProxy
      */
-    public function setHttpProxy($httpProxy) {
+    public function setHttpProxy($httpProxy)
+    {
         $this->httpProxy = $httpProxy;
     }
 
     /**
      * @param $certPath
      */
-    public function setCertPath($certPath) {
+    public function setCertPath($certPath)
+    {
         $this->certPath = $certPath;
     }
 
@@ -698,21 +684,24 @@ class OpenIDConnectClient
      * @param $array
      *        simple key => value
      */
-    public function providerConfigParam($array) {
+    public function providerConfigParam($array)
+    {
         $this->providerConfig = array_merge($this->providerConfig, $array);
     }
 
     /**
      * @param $clientSecret
      */
-    public function setClientSecret($clientSecret) {
+    public function setClientSecret($clientSecret)
+    {
         $this->clientSecret = $clientSecret;
     }
 
     /**
      * @param $clientID
      */
-    public function setClientID($clientID) {
+    public function setClientID($clientID)
+    {
         $this->clientID = $clientID;
     }
 
@@ -722,7 +711,8 @@ class OpenIDConnectClient
      *
      * @throws OpenIDConnectClientException
      */
-    public function register() {
+    public function register()
+    {
 
         $registration_endpoint = $this->getProviderConfigValue('registration_endpoint');
 
@@ -758,51 +748,83 @@ class OpenIDConnectClient
     /**
      * @return mixed
      */
-    public function getClientName() {
+    public function getClientName()
+    {
         return $this->clientName;
     }
 
     /**
      * @param $clientName
      */
-    public function setClientName($clientName) {
+    public function setClientName($clientName)
+    {
         $this->clientName = $clientName;
     }
 
     /**
      * @return string
      */
-    public function getClientID() {
+    public function getClientID()
+    {
         return $this->clientID;
     }
 
     /**
      * @return string
      */
-    public function getClientSecret() {
+    public function getClientSecret()
+    {
         return $this->clientSecret;
     }
 
     /**
      * @return bool
      */
-    public function canVerifySignatures() {
-      return class_exists('\phpseclib\Crypt\RSA');
+    public function canVerifySignatures()
+    {
+        return class_exists('\phpseclib\Crypt\RSA');
     }
 
     /**
      * @return string
      */
-    public function getAccessToken() {
+    public function getAccessToken()
+    {
         return $this->accessToken;
     }
 
     /**
      * @return string
      */
-    public function getRefreshToken() {
+    public function getRefreshToken()
+    {
         return $this->refreshToken;
     }
 
 
+    /**
+     * A wrapper around base64_decode which decodes Base64URL-encoded data,
+     * which is not the same alphabet as base64.
+     */
+    private function base64url_decode($base64url)
+    {
+        return base64_decode($this->b64url2b64($base64url));
+    }
+
+    /**
+     * Per RFC4648, "base64 encoding with URL-safe and filename-safe
+     * alphabet".  This just replaces characters 62 and 63.  None of the
+     * reference implementations seem to restore the padding if necessary,
+     * but we'll do it anyway.
+     *
+     */
+    private function b64url2b64($base64url)
+    {
+        // "Shouldn't" be necessary, but why not
+        $padding = strlen($base64url) % 4;
+        if ($padding > 0) {
+            $base64url .= str_repeat("=", 4 - $padding);
+        }
+        return strtr($base64url, '-_', '+/');
+    }
 }

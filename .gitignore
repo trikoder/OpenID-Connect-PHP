@@ -1,0 +1,21 @@
+#backup files from unix editors
+*~
+
+#PHPStorm
+.idea
+
+#merge files
+*.orig
+
+# sublime
+*.sublime*
+
+# sys cache dirs
+.sass-cache
+.DS_Store
+
+# tmp dev folders
+/__*
+
+#composer
+/vendor/
