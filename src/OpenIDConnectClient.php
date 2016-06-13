@@ -21,7 +21,7 @@ namespace Trikoder\OpenIdConnectPhp;
  * License for the specific language governing permissions and limitations
  * under the License.
  *
- * 
+ *
  */
 
 use Symfony\Component\HttpFoundation\Request;
@@ -67,12 +67,12 @@ class OpenIDConnectClient
     private $certPath;
 
     /**
-     * @var string if we aquire an access token it will be stored here
+     * @var Token if we aquire an access token it will be stored here
      */
     private $accessToken;
 
     /**
-     * @var string if we aquire a refresh token it will be stored here
+     * @var Token if we aquire a refresh token it will be stored here
      */
     private $refreshToken;
 
@@ -102,6 +102,11 @@ class OpenIDConnectClient
     private $session;
 
     /**
+     * @var string
+     */
+    private $wellKnownConfiguration = "/.well-known/openid-configuration";
+
+    /**
      * @param $provider_url string optional
      *
      * @param $client_id string optional
@@ -121,6 +126,14 @@ class OpenIDConnectClient
         $this->clientSecret = $client_secret;
         $this->request = $request;
         $this->session = $session;
+
+        // get tokens from session
+        if ($this->session->has('openid_access_token')) {
+            $this->accessToken = $this->session->get('openid_access_token');
+        }
+        if ($this->session->has('openid_refresh_token')) {
+            $this->refreshToken = $this->session->get('openid_refresh_token');
+        }
     }
 
     /**
@@ -181,11 +194,13 @@ class OpenIDConnectClient
                 $this->session->remove('openid_connect_nonce');
 
                 // Save the access token
-                $this->accessToken = $token_json->access_token;
+                $this->accessToken = new Token($token_json->access_token, $token_json->expires_in);
+                $this->session->set('openid_access_token', $this->accessToken);
 
                 // Save the refresh token, if we got one
                 if (isset($token_json->refresh_token)) {
-                    $this->refreshToken = $token_json->refresh_token;
+                    $this->refreshToken = new Token($token_json->refresh_token, $token_json->refresh_expires_in);
+                    $this->session->set('openid_refresh_token', $this->refreshToken);
                 }
 
                 // Success!
@@ -233,7 +248,7 @@ class OpenIDConnectClient
         // If the configuration value is not available, attempt to fetch it from a well known config endpoint
         // This is also known as auto "discovery"
         if (!isset($this->providerConfig[$param])) {
-            $well_known_config_url = rtrim($this->getProviderURL(), "/") . "/.well-known/openid-configuration";
+            $well_known_config_url = rtrim($this->getProviderURL(), "/") . $this->wellKnownConfiguration;
             $value = json_decode($this->fetchURL($well_known_config_url))->{$param};
 
             if ($value) {
@@ -369,6 +384,18 @@ class OpenIDConnectClient
 
     }
 
+    public function logout()
+    {
+        if(true === $this->accessToken->isExpired()) {
+            $this->refreshToken($this->refreshToken->getToken());
+        }
+
+        $logout_endpoint = $this->getProviderConfigValue("end_session_endpoint");
+        //The accessToken has to be send in the Authorization header, so we create a new array with only this header.
+        $headers = array("Authorization: Bearer {$this->accessToken->getToken()}");
+        return json_decode($this->fetchURL($logout_endpoint, null, $headers));
+    }
+
     /**
      * Requests Access token with refresh token
      *
@@ -391,10 +418,15 @@ class OpenIDConnectClient
         // Convert token params to string format
         $token_params = http_build_query($token_params, null, '&');
 
-        $json = json_decode($this->fetchURL($token_endpoint, $token_params));
-        $this->refreshToken = $json->refresh_token;
+        $token_json = json_decode($this->fetchURL($token_endpoint, $token_params));
 
-        return $json;
+        // Save the tokens
+        $this->accessToken = new Token($token_json->access_token, $token_json->expires_in);
+        $this->session->set('openid_access_token', $this->accessToken);
+        $this->refreshToken = new Token($token_json->refresh_token, $token_json->refresh_expires_in);
+        $this->session->set('openid_refresh_token', $this->refreshToken);
+
+        return $token_json;
     }
 
     /**
@@ -537,6 +569,10 @@ class OpenIDConnectClient
         if (array_key_exists($attribute, $this->userInfo)) {
             return $this->userInfo->$attribute;
         }
+        
+        if(true === $this->accessToken->isExpired()) {
+            $this->refreshToken($this->refreshToken->getToken());
+        }
 
         $user_info_endpoint = $this->getProviderConfigValue("userinfo_endpoint");
         $schema = 'openid';
@@ -544,7 +580,7 @@ class OpenIDConnectClient
         $user_info_endpoint .= "?schema=" . $schema;
 
         //The accessToken has to be send in the Authorization header, so we create a new array with only this header.
-        $headers = array("Authorization: Bearer {$this->accessToken}");
+        $headers = array("Authorization: Bearer {$this->accessToken->getToken()}");
 
         $user_json = json_decode($this->fetchURL($user_info_endpoint, null, $headers));
 
@@ -631,6 +667,8 @@ class OpenIDConnectClient
         if ($output === false) {
             throw new OpenIDConnectClientException('Curl error: ' . curl_error($ch));
         }
+
+        $status = curl_getinfo($ch);
 
         // Close the cURL resource, and free system resources
         curl_close($ch);
@@ -786,7 +824,7 @@ class OpenIDConnectClient
     }
 
     /**
-     * @return string
+     * @return Token
      */
     public function getAccessToken()
     {
@@ -794,7 +832,7 @@ class OpenIDConnectClient
     }
 
     /**
-     * @return string
+     * @return Token
      */
     public function getRefreshToken()
     {
@@ -826,5 +864,23 @@ class OpenIDConnectClient
             $base64url .= str_repeat("=", 4 - $padding);
         }
         return strtr($base64url, '-_', '+/');
+    }
+
+    /**
+     * @return string
+     */
+    public function getWellKnownConfiguration()
+    {
+        return $this->wellKnownConfiguration;
+    }
+
+    /**
+     * @param string $wellKnownConfiguration
+     * @return $this
+     */
+    public function setWellKnownConfiguration($wellKnownConfiguration)
+    {
+        $this->wellKnownConfiguration = $wellKnownConfiguration;
+        return $this;
     }
 }
