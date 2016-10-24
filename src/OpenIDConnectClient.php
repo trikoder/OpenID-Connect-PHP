@@ -883,4 +883,29 @@ class OpenIDConnectClient
         $this->wellKnownConfiguration = $wellKnownConfiguration;
         return $this;
     }
+
+    /**
+     * Returns access tokens
+     * @return mixed
+     */
+    public function requestAccessToken()
+    {
+        $url = $this->getProviderConfigValue('token_endpoint');
+
+        $params = [
+            'grant_type'    => 'client_credentials',
+            'client_id'     => $this->clientID,
+            'client_secret' => $this->clientSecret
+        ];
+
+        $queryString = http_build_query($params, null, '&');
+        $result = json_decode($this->fetchURL($url, $queryString), true);
+
+        if (isset($result['access_token'])) {
+            return $result['access_token'];
+        }
+
+        return null;
+    }
+
 }
