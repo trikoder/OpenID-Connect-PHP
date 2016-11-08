@@ -885,10 +885,10 @@ class OpenIDConnectClient
     }
 
     /**
-     * Returns access tokens
+     * Returns client access tokens
      * @return mixed
      */
-    public function requestAccessToken()
+    public function requestClientAccessToken()
     {
         $url = $this->getProviderConfigValue('token_endpoint');
 
