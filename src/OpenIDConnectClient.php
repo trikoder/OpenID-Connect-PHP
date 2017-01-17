@@ -39,72 +39,72 @@ class OpenIDConnectClient
     /**
      * @var string arbitrary id value
      */
-    private $clientID;
+    protected $clientID;
 
     /*
      * @var string arbitrary name value
      */
-    private $clientName;
+    protected $clientName;
 
     /**
      * @var string arbitrary secret value
      */
-    private $clientSecret;
+    protected $clientSecret;
 
     /**
      * @var array holds the provider configuration
      */
-    private $providerConfig = array();
+    protected $providerConfig = array();
 
     /**
      * @var string http proxy if necessary
      */
-    private $httpProxy;
+    protected $httpProxy;
 
     /**
      * @var string full system path to the SSL certificate
      */
-    private $certPath;
+    protected $certPath;
 
     /**
      * @var Token if we aquire an access token it will be stored here
      */
-    private $accessToken;
+    protected $accessToken;
 
     /**
      * @var Token if we aquire a refresh token it will be stored here
      */
-    private $refreshToken;
+    protected $refreshToken;
 
     /**
      * @var array holds scopes
      */
-    private $scopes = array();
+    protected $scopes = array();
 
     /**
      * @var array holds a cache of info returned from the user info endpoint
      */
-    private $userInfo = array();
+    protected $userInfo = array();
 
     /**
      * @var array holds authentication parameters
      */
-    private $authParams = array();
+    protected $authParams = array();
 
     /**
      * @var Request
      */
-    private $request;
+    protected $request;
 
     /**
      * @var Session
      */
-    private $session;
+    protected $session;
 
     /**
      * @var string
      */
-    private $wellKnownConfiguration = "/.well-known/openid-configuration";
+    protected $wellKnownConfiguration = "/.well-known/openid-configuration";
 
     /**
      * @param $provider_url string optional
@@ -242,7 +242,7 @@ class OpenIDConnectClient
      * @return string
      *
      */
-    private function getProviderConfigValue($param)
+    protected function getProviderConfigValue($param)
     {
 
         // If the configuration value is not available, attempt to fetch it from a well known config endpoint
@@ -319,7 +319,7 @@ class OpenIDConnectClient
      * Start Here
      * @return void
      */
-    private function requestAuthorization()
+    protected function requestAuthorization()
     {
 
         $auth_endpoint = $this->getProviderConfigValue("authorization_endpoint");
@@ -361,7 +361,7 @@ class OpenIDConnectClient
      * @param $code
      * @return mixed
      */
-    private function requestTokens($code)
+    protected function requestTokens($code)
     {
 
 
@@ -435,7 +435,7 @@ class OpenIDConnectClient
      * @throws OpenIDConnectClientException
      * @return object
      */
-    private function get_key_for_header($keys, $header)
+    protected function get_key_for_header($keys, $header)
     {
         foreach ($keys as $key) {
             if ((!(isset($key->alg) && isset($header->kid)) && $key->kty == 'RSA') || ($key->alg == $header->alg && $key->kid == $header->kid)) {
@@ -456,7 +456,7 @@ class OpenIDConnectClient
      * @throws OpenIDConnectClientException
      * @return bool
      */
-    private function verifyRSAJWTsignature($hashtype, $key, $payload, $signature)
+    protected function verifyRSAJWTsignature($hashtype, $key, $payload, $signature)
     {
         if (!class_exists('\phpseclib\Crypt\RSA')) {
             throw new OpenIDConnectClientException('Crypt_RSA support unavailable.');
@@ -484,7 +484,7 @@ class OpenIDConnectClient
      * @throws OpenIDConnectClientException
      * @return bool
      */
-    private function verifyJWTsignature($jwt)
+    protected function verifyJWTsignature($jwt)
     {
         $parts = explode(".", $jwt);
         $signature = $this->base64url_decode(array_pop($parts));
@@ -515,7 +515,7 @@ class OpenIDConnectClient
      * @param object $claims
      * @return bool
      */
-    private function verifyJWTclaims($claims)
+    protected function verifyJWTclaims($claims)
     {
         return (($claims->iss == $this->getProviderURL())
             && (($claims->aud == $this->clientID) || (in_array($this->clientID, $claims->aud)))
@@ -528,7 +528,7 @@ class OpenIDConnectClient
      * @param int $section the section we would like to decode
      * @return object
      */
-    private function decodeJWT($jwt, $section = 0)
+    protected function decodeJWT($jwt, $section = 0)
     {
 
         $parts = explode(".", $jwt);
@@ -844,7 +844,7 @@ class OpenIDConnectClient
      * A wrapper around base64_decode which decodes Base64URL-encoded data,
      * which is not the same alphabet as base64.
      */
-    private function base64url_decode($base64url)
+    protected function base64url_decode($base64url)
     {
         return base64_decode($this->b64url2b64($base64url));
     }
@@ -856,7 +856,7 @@ class OpenIDConnectClient
      * but we'll do it anyway.
      *
      */
-    private function b64url2b64($base64url)
+    protected function b64url2b64($base64url)
     {
         // "Shouldn't" be necessary, but why not
         $padding = strlen($base64url) % 4;
